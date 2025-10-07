@@ -1,4 +1,4 @@
-![0e9476fc-78a5-4414-a8e4-f68cb9157836](https://github.com/user-attachments/assets/0bba019b-e468-4d8e-a436-4242afce91a3)
+![46cf7071-f134-4028-9691-bc44e90440ac](https://github.com/user-attachments/assets/11f44fb0-44f9-444e-badb-09cba3087f45)
 
 <BR>
 The location for the FGBasic info and Downloads. This is a WIP, and features will be added and/or changed.
