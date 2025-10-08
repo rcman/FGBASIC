@@ -13,3 +13,17 @@ WHILE INKEY$ <> "ESC"<BR>
   REM Game loop here<BR>
 WEND<BR>
 <BR>
+***********************************************************************
+<BR>
+MODE 4<BR>
+SPRITE CREATE 0, 32, 32, 0xFFFF0000<BR>
+SPRITE SHOW 0<BR>
+SPRITE MOVE 0, 640, 360<BR>
+<BR>
+WHILE INKEY$ <> "q"<BR>
+  K$ = INKEY$<BR>
+  IF K$ = "UP" THEN SPRITE MOVEBY 0, 0, -5<BR>
+  IF K$ = "DOWN" THEN SPRITE MOVEBY 0, 0, 5<BR>
+  IF K$ = "LEFT" THEN SPRITE MOVEBY 0, -5, 0<BR>
+  IF K$ = "RIGHT" THEN SPRITE MOVEBY 0, 5, 0<BR>
+WEND<BR>
