@@ -4,6 +4,8 @@
 This breaks down as:
 <BR>
 
+<BR>
+
 FF = Alpha (255, fully opaque)
 <BR>
 FF = Red (255, full red)
