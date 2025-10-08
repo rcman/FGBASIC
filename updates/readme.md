@@ -3,7 +3,8 @@
 <BR>
 
 - Added option for GPRINT to place text on a graphic screen.<BR>
-
+- Added While and WEND
+- Added $INKEY
 <BR>
 
 # Fixes
