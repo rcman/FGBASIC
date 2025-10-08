@@ -1,7 +1,7 @@
 # This is for testing
 
 <BR>
-MODE 4                        ' 1280x720 HD mode<BR>
+MODE 4                       
 FOR I = 0 TO 99<BR>
 SPRITE CREATE I, 32, 32, 0xFFFF0000<BR>
 SPRITE SHOW I<BR>
