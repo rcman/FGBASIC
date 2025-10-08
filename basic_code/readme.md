@@ -1,11 +1,11 @@
 # This is for testing
 
 <BR>
-10 CLS
-<BR>
-20 SPRITE MOVE 0, x, y
-<BR>
-30 x = x + 1
-<BR>
-40 IF x < 640 THEN GOTO 10
-<BR>
+10 MODE 4                        ' 1280x720 HD mode<BR>
+20 FOR I = 0 TO 99<BR>
+30   SPRITE CREATE I, 32, 32, 0xFFFF0000<BR>
+40   SPRITE SHOW I<BR>
+50   SPRITE MOVE I, RND*1280, RND*720<BR>
+60   SPRITE ROTATE I, RND*360<BR>
+70 NEXT I<BR>
+80 TEXT 100,100 "100 sprites at 60 FPS!"<BR>
