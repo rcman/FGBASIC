@@ -1,12 +1,12 @@
 # This is for testing
 
 <BR>
-MODE 4 <BR>                      
+MODE 4 REM  1280x720 HD mode<BR>                      
 FOR I = 0 TO 99<BR>
 SPRITE CREATE I, 32, 32, 0xFFFF0000<BR>
 SPRITE SHOW I<BR>
 SPRITE MOVE I, RND*1280, RND*720<BR>
 SPRITE ROTATE I, RND*360<BR>
 NEXT I<BR>
-COLOR 255, 255, 0<BR>
-TEXT 100, 100, "100 sprites at 60 FPS!"<BR>
+COLOR 255, 255, 0    REM SET THE COLOR OF THE TEXT<BR>
+TEXT 100, 100, "100 sprites at 60 FPS!"   REM You can use TEXT or GPRINT - Both work the same <BR>
