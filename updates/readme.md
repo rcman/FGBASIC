@@ -6,7 +6,8 @@
 - Added While and WEND
 - Added $INKEY
 - Compile to executable - Works for Linux, Mac, Windows
-- 
+- AI Support
+
 <BR>
 
 # Fixes
