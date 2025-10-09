@@ -25,3 +25,7 @@
 <BR>
 
 - Database support
+- IA Support
+- Compile to EXE
+- Be able to import other versions of basic and run
+- 
