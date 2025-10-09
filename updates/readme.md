@@ -22,7 +22,7 @@
 - Lines without any of the above get automatic line numbers (10, 20, 30...)
 - Fixed the SPRITE Moving issue
 - Fixed the RBG for sprites and text 
-
+- 
 <BR>
 
 # Feature Requests
@@ -33,4 +33,4 @@
 - IA Support (ADDED)
 - Compile to executable (ADDED)
 - Be able to import other versions of basic and run
-- 
+- Need to be able to change background color
