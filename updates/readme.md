@@ -5,6 +5,8 @@
 - Added option for GPRINT to place text on a graphic screen.<BR>
 - Added While and WEND
 - Added $INKEY
+- Compile to executable - Works for Linux, Mac, Windows
+- 
 <BR>
 
 # Fixes
