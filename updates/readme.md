@@ -17,6 +17,8 @@
 - Lines with : (not in quotes) are treated as labels
 - Lines starting with numbers are traditional BASIC line numbers
 - Lines without any of the above get automatic line numbers (10, 20, 30...)
+- Fixed the SPRITE Moving issue
+- Fixed the RBG for sprites and text 
 
 <BR>
 
