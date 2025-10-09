@@ -29,7 +29,7 @@
 <BR>
 
 - Database support
-- IA Support
-- Compile to EXE
+- IA Support (ADDED)
+- Compile to executable (ADDED)
 - Be able to import other versions of basic and run
 - 
