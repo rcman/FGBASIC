@@ -13,7 +13,7 @@ import javax.imageio.ImageIO;
 /**
  * FGBasic - GPU-Accelerated BASIC Interpreter (Java 24)
  * WITH CANVAS INVALIDATION SUPPORT
- Version 3.0.1
+ Version 3.0.2
  */
 public class BasicInterpreter {
     
@@ -2031,5 +2031,6 @@ public class BasicInterpreter {
         basic.graphics.setSpriteEngine(basic.sprites);
         basic.startIDE();
     }
+
 
 }
