@@ -686,27 +686,33 @@ public class BasicInterpreter {
         forStack.push(new ForLoopContext(varName, start, end, step, currentLine));
     }
     
-    private Integer executeNext(String[] tokens) {
-        if (forStack.isEmpty()) {
-            throw new RuntimeException("NEXT without FOR");
-        }
-        
-        ForLoopContext ctx = forStack.peek();
-        TypedValue tv = variables.get(ctx.varName);
-        double current = tv != null ? tv.getNumeric() : 0.0;
-        current += ctx.step;
-        setVariable(ctx.varName, current);
-        
-        boolean done = (ctx.step > 0 && current > ctx.end) || 
-                       (ctx.step < 0 && current < ctx.end);
-        
-        if (done) {
-            forStack.pop();
-            return null;
-        } else {
-            return ctx.startLine;
-        }
+   private Integer executeNext(String[] tokens) {
+    if (forStack.isEmpty()) {
+        throw new RuntimeException("NEXT without FOR");
     }
+    
+    ForLoopContext ctx = forStack.peek();
+    TypedValue tv = variables.get(ctx.varName);
+    double current = tv != null ? tv.getNumeric() : 0.0;
+    current += ctx.step;
+    setVariable(ctx.varName, current);
+    
+    boolean done = (ctx.step > 0 && current > ctx.end) || 
+                   (ctx.step < 0 && current < ctx.end);
+    
+    if (done) {
+        forStack.pop();
+        return null;  // Continue to next line after loop
+    } else {
+        // Find the line AFTER the FOR statement to continue the loop
+        List<Integer> lineNumbers = new ArrayList<>(program.keySet());
+        int forLineIndex = lineNumbers.indexOf(ctx.startLine);
+        if (forLineIndex >= 0 && forLineIndex < lineNumbers.size() - 1) {
+            return lineNumbers.get(forLineIndex + 1);  // Go to line after FOR
+        }
+        return null;
+    }
+}
     
     private void executeRead(String[] tokens) {
         for (int i = 1; i < tokens.length; i++) {
@@ -2027,7 +2033,3 @@ public class BasicInterpreter {
     }
 
 }
-
-
-
-
