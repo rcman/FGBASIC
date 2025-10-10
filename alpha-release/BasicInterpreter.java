@@ -1,4 +1,3 @@
-
 import java.util.*;
 import java.util.List;
 import java.util.regex.*;
@@ -12,8 +11,7 @@ import javax.imageio.ImageIO;
 
 /**
  * FGBasic - GPU-Accelerated BASIC Interpreter (Java 24)
- * WITH CANVAS INVALIDATION SUPPORT
- Version 3.0.2
+ * Version 3.0.3 - WITH IMPROVED TOKENIZATION
  */
 public class BasicInterpreter {
     
@@ -27,7 +25,7 @@ public class BasicInterpreter {
     private final Queue<String> dataQueue = new LinkedList<>();
     private int currentLine = 0;
     private int autoLineNumber = 10;
-    private volatile boolean running = false;
+    volatile boolean running = false;
     private final Random random = new Random();
     
     private final GraphicsEngine graphics;
@@ -384,16 +382,36 @@ public class BasicInterpreter {
             if (c == '"') {
                 inString = !inString;
                 current.append(c);
-            } else if (!inString && (c == ' ' || c == ',' || c == ';')) {
-                if (!current.isEmpty()) {
-                    tokens.add(current.toString());
-                    current = new StringBuilder();
-                }
-                if (c == ',' || c == ';') {
-                    tokens.add(String.valueOf(c));
-                }
-            } else {
+            } else if (inString) {
                 current.append(c);
+            } else {
+                if (isDelimiter(c)) {
+                    if (!current.isEmpty()) {
+                        tokens.add(current.toString());
+                        current = new StringBuilder();
+                    }
+                    
+                    if (i < line.length() - 1) {
+                        char next = line.charAt(i + 1);
+                        String twoChar = "" + c + next;
+                        
+                        if (twoChar.equals("<=") || twoChar.equals(">=") || twoChar.equals("<>")) {
+                            tokens.add(twoChar);
+                            i++;
+                            continue;
+                        }
+                    }
+                    
+                    if (c == ',' || c == ';') {
+                        tokens.add(String.valueOf(c));
+                    } else if (c == '=' || c == '<' || c == '>' || 
+                              c == '+' || c == '-' || c == '*' || c == '/' || c == '^' ||
+                              c == '(' || c == ')') {
+                        tokens.add(String.valueOf(c));
+                    }
+                } else {
+                    current.append(c);
+                }
             }
         }
         
@@ -402,6 +420,12 @@ public class BasicInterpreter {
         }
         
         return tokens.toArray(String[]::new);
+    }
+    
+    private boolean isDelimiter(char c) {
+        return c == ' ' || c == ',' || c == ';' || c == '=' || 
+               c == '<' || c == '>' || c == '+' || c == '-' || 
+               c == '*' || c == '/' || c == '^' || c == '(' || c == ')';
     }
     
     private List<String> filterCommas(String[] tokens, int startIdx) {
@@ -570,25 +594,27 @@ public class BasicInterpreter {
     }
     
     private void executeLet(String[] tokens) {
-        String line = String.join(" ", tokens);
-        int eqPos = line.indexOf('=');
+        StringBuilder lineBuilder = new StringBuilder();
+        for (String token : tokens) {
+            lineBuilder.append(token);
+        }
+        String line = lineBuilder.toString();
+        
+        String upperLine = line.toUpperCase();
+        if (upperLine.startsWith("LET")) {
+            line = line.substring(3).trim();
+        }
+        
+        int eqPos = findEqualsSign(line);
         if (eqPos < 0) return;
         
         String varName = line.substring(0, eqPos).trim();
-        if (varName.equalsIgnoreCase("LET")) {
-            varName = line.substring(3, eqPos).trim();
-        }
-        
         String expr = line.substring(eqPos + 1).trim();
         
         if (expr.trim().equalsIgnoreCase("INKEY$")) {
             String key = graphics.getLastKey();
             graphics.clearLastKey();
             setVariable(varName, key);
-            if (!key.isEmpty()) {
-                logOutput("DEBUG: INKEY$ = '" + key + "' (ASCII " + (int)key.charAt(0) + ")\n");
-                System.err.println("INKEY$ returned: '" + key + "' to variable " + varName);
-            }
             return;
         }
         
@@ -597,7 +623,7 @@ public class BasicInterpreter {
         if (varName.contains("(")) {
             int paren = varName.indexOf('(');
             String arrayName = normalizeVarName(varName.substring(0, paren));
-            String indexStr = varName.substring(paren + 1, varName.length() - 1);
+            String indexStr = varName.substring(paren + 1, varName.indexOf(')'));
             int index = ((Number) evaluateExpression(indexStr)).intValue();
             
             TypedArray array = arrays.get(arrayName);
@@ -608,6 +634,32 @@ public class BasicInterpreter {
         } else {
             setVariable(varName, value);
         }
+    }
+    
+    private int findEqualsSign(String line) {
+        boolean inString = false;
+        boolean afterComparison = false;
+        
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            
+            if (c == '"') {
+                inString = !inString;
+            } else if (!inString) {
+                if (c == '<' || c == '>') {
+                    afterComparison = true;
+                } else if (c == '=' && !afterComparison) {
+                    if (i > 0 && (line.charAt(i - 1) == '<' || line.charAt(i - 1) == '>')) {
+                        continue;
+                    }
+                    return i;
+                } else if (c != ' ') {
+                    afterComparison = false;
+                }
+            }
+        }
+        
+        return -1;
     }
     
     private void setVariable(String varName, Object value) {
@@ -644,10 +696,20 @@ public class BasicInterpreter {
             String thenPart = line.substring(thenPos + 4).trim();
             
             String[] thenTokens = thenPart.split("\\s+");
-            if (thenTokens.length > 0 && !thenPart.contains("=") && !thenPart.contains(":")) {
-                try {
-                    return resolveLabel(thenTokens[0]);
-                } catch (Exception e) {
+            if (thenTokens.length > 0) {
+                String cmd = thenTokens[0].toUpperCase();
+                if (cmd.equals("GOTO") || cmd.equals("GOSUB")) {
+                    if (thenTokens.length > 1) {
+                        if (cmd.equals("GOSUB")) {
+                            gosubStack.push(currentLine);
+                        }
+                        return resolveLabel(thenTokens[1]);
+                    }
+                } else if (!thenPart.contains("=") && !thenPart.contains(":")) {
+                    try {
+                        return resolveLabel(thenTokens[0]);
+                    } catch (Exception e) {
+                    }
                 }
             }
             
@@ -686,33 +748,32 @@ public class BasicInterpreter {
         forStack.push(new ForLoopContext(varName, start, end, step, currentLine));
     }
     
-   private Integer executeNext(String[] tokens) {
-    if (forStack.isEmpty()) {
-        throw new RuntimeException("NEXT without FOR");
-    }
-    
-    ForLoopContext ctx = forStack.peek();
-    TypedValue tv = variables.get(ctx.varName);
-    double current = tv != null ? tv.getNumeric() : 0.0;
-    current += ctx.step;
-    setVariable(ctx.varName, current);
-    
-    boolean done = (ctx.step > 0 && current > ctx.end) || 
-                   (ctx.step < 0 && current < ctx.end);
-    
-    if (done) {
-        forStack.pop();
-        return null;  // Continue to next line after loop
-    } else {
-        // Find the line AFTER the FOR statement to continue the loop
-        List<Integer> lineNumbers = new ArrayList<>(program.keySet());
-        int forLineIndex = lineNumbers.indexOf(ctx.startLine);
-        if (forLineIndex >= 0 && forLineIndex < lineNumbers.size() - 1) {
-            return lineNumbers.get(forLineIndex + 1);  // Go to line after FOR
+    private Integer executeNext(String[] tokens) {
+        if (forStack.isEmpty()) {
+            throw new RuntimeException("NEXT without FOR");
         }
-        return null;
+        
+        ForLoopContext ctx = forStack.peek();
+        TypedValue tv = variables.get(ctx.varName);
+        double current = tv != null ? tv.getNumeric() : 0.0;
+        current += ctx.step;
+        setVariable(ctx.varName, current);
+        
+        boolean done = (ctx.step > 0 && current > ctx.end) || 
+                       (ctx.step < 0 && current < ctx.end);
+        
+        if (done) {
+            forStack.pop();
+            return null;
+        } else {
+            List<Integer> lineNumbers = new ArrayList<>(program.keySet());
+            int forLineIndex = lineNumbers.indexOf(ctx.startLine);
+            if (forLineIndex >= 0 && forLineIndex < lineNumbers.size() - 1) {
+                return lineNumbers.get(forLineIndex + 1);
+            }
+            return null;
+        }
     }
-}
     
     private void executeRead(String[] tokens) {
         for (int i = 1; i < tokens.length; i++) {
@@ -806,10 +867,6 @@ public class BasicInterpreter {
         int paren = expr.indexOf('(');
         String funcName = expr.substring(0, paren).toUpperCase();
         String args = expr.substring(paren + 1, expr.lastIndexOf(')'));
-
-       // int min = 1;
-       // int max = 100;
-       //  int randomInt = (int) (Math.random() * (max - min + 1) + min);
         
         return switch (funcName) {
             case "SIN" -> Math.sin(((Number) evaluateExpression(args)).doubleValue());
@@ -818,7 +875,6 @@ public class BasicInterpreter {
             case "SQR", "SQRT" -> Math.sqrt(((Number) evaluateExpression(args)).doubleValue());
             case "ABS" -> Math.abs(((Number) evaluateExpression(args)).doubleValue());
             case "INT" -> (double) ((Number) evaluateExpression(args)).intValue();
-           // case "RND" -> random.nextDouble();
             case "RND" -> random.nextInt(100)+1; 
             case "LEN" -> (double) evaluateExpression(args).toString().length();
             case "CHR$" -> {
@@ -835,115 +891,169 @@ public class BasicInterpreter {
     }
     
     private double evaluateArithmetic(String expr) {
-        return parseAddSub(expr);
-    }
-    
-    private double parseAddSub(String expr) {
-        int level = 0;
-        for (int i = expr.length() - 1; i >= 0; i--) {
-            char c = expr.charAt(i);
-            if (c == ')') level++;
-            if (c == '(') level--;
-            if (level == 0 && (c == '+' || c == '-')) {
-                return c == '+' ?
-                    parseAddSub(expr.substring(0, i)) + parseMulDiv(expr.substring(i + 1)) :
-                    parseAddSub(expr.substring(0, i)) - parseMulDiv(expr.substring(i + 1));
-            }
-        }
-        return parseMulDiv(expr);
-    }
-    
-    private double parseMulDiv(String expr) {
-        int level = 0;
-        for (int i = expr.length() - 1; i >= 0; i--) {
-            char c = expr.charAt(i);
-            if (c == ')') level++;
-            if (c == '(') level--;
-            if (level == 0 && (c == '*' || c == '/')) {
-                return c == '*' ?
-                    parseMulDiv(expr.substring(0, i)) * parsePower(expr.substring(i + 1)) :
-                    parseMulDiv(expr.substring(0, i)) / parsePower(expr.substring(i + 1));
-            }
-        }
-        return parsePower(expr);
-    }
-    
-    private double parsePower(String expr) {
-        int level = 0;
-        for (int i = expr.length() - 1; i >= 0; i--) {
-            char c = expr.charAt(i);
-            if (c == ')') level++;
-            if (c == '(') level--;
-            if (level == 0 && c == '^') {
-                return Math.pow(parsePower(expr.substring(0, i)), 
-                    parsePrimary(expr.substring(i + 1)));
-            }
-        }
-        return parsePrimary(expr);
-    }
-    
-    private double parsePrimary(String expr) {
         expr = expr.trim();
-
-        if (expr.startsWith("(") && expr.endsWith(")")) {
-            return evaluateArithmetic(expr.substring(1, expr.length() - 1));
-        }
-
-        if (expr.startsWith("-")) {
-            return -parsePrimary(expr.substring(1));
-        }
-
-        if (expr.toLowerCase().startsWith("0x")) {
-            try {
-                String hexPart = expr.substring(2);
-                if (hexPart.isEmpty()) return 0.0;
-                long value = Long.parseLong(hexPart, 16);
-                return (double) value;
-            } catch (NumberFormatException e) {
-                return 0.0;
+        
+        List<String> tokens = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        
+        for (int i = 0; i < expr.length(); i++) {
+            char c = expr.charAt(i);
+            
+            if (c == ' ') {
+                continue;
+            } else if (isOperator(c)) {
+                if (!current.isEmpty()) {
+                    tokens.add(current.toString());
+                    current = new StringBuilder();
+                }
+                
+                if (c == '-' && (tokens.isEmpty() || isOperator(tokens.get(tokens.size() - 1).charAt(0)) || tokens.get(tokens.size() - 1).equals("("))) {
+                    current.append(c);
+                } else {
+                    tokens.add(String.valueOf(c));
+                }
+            } else if (c == '(' || c == ')') {
+                if (!current.isEmpty()) {
+                    tokens.add(current.toString());
+                    current = new StringBuilder();
+                }
+                tokens.add(String.valueOf(c));
+            } else {
+                current.append(c);
             }
         }
-
-        try {
-            return Double.parseDouble(expr);
-        } catch (NumberFormatException e) {
+        
+        if (!current.isEmpty()) {
+            tokens.add(current.toString());
         }
-
-        if (expr.contains("(") && expr.contains(")")) {
-            int paren = expr.indexOf('(');
-            String name = normalizeVarName(expr.substring(0, paren));
+        
+        return evaluateTokens(tokens);
+    }
+    
+    private boolean isOperator(char c) {
+        return c == '+' || c == '-' || c == '*' || c == '/' || c == '^';
+    }
+    
+    private double evaluateTokens(List<String> tokens) {
+        if (tokens.isEmpty()) return 0.0;
+        if (tokens.size() == 1) {
+            return parseValue(tokens.get(0));
+        }
+        
+        return parseAddSubTokens(tokens, 0, tokens.size());
+    }
+    
+    private double parseAddSubTokens(List<String> tokens, int start, int end) {
+        int parenDepth = 0;
+        
+        for (int i = end - 1; i >= start; i--) {
+            String token = tokens.get(i);
             
-            if (arrays.containsKey(name)) {
-                String indexStr = expr.substring(paren + 1, expr.lastIndexOf(')'));
-                int index = ((Number) evaluateArithmetic(indexStr)).intValue();
+            if (token.equals(")")) parenDepth++;
+            else if (token.equals("(")) parenDepth--;
+            else if (parenDepth == 0 && (token.equals("+") || token.equals("-"))) {
+                double left = parseAddSubTokens(tokens, start, i);
+                double right = parseMulDivTokens(tokens, i + 1, end);
+                return token.equals("+") ? left + right : left - right;
+            }
+        }
+        
+        return parseMulDivTokens(tokens, start, end);
+    }
+    
+    private double parseMulDivTokens(List<String> tokens, int start, int end) {
+        int parenDepth = 0;
+        
+        for (int i = end - 1; i >= start; i--) {
+            String token = tokens.get(i);
+            
+            if (token.equals(")")) parenDepth++;
+            else if (token.equals("(")) parenDepth--;
+            else if (parenDepth == 0 && (token.equals("*") || token.equals("/"))) {
+                double left = parseMulDivTokens(tokens, start, i);
+                double right = parsePowerTokens(tokens, i + 1, end);
+                return token.equals("*") ? left * right : left / right;
+            }
+        }
+        
+        return parsePowerTokens(tokens, start, end);
+    }
+    
+    private double parsePowerTokens(List<String> tokens, int start, int end) {
+        int parenDepth = 0;
+        
+        for (int i = end - 1; i >= start; i--) {
+            String token = tokens.get(i);
+            
+            if (token.equals(")")) parenDepth++;
+            else if (token.equals("(")) parenDepth--;
+            else if (parenDepth == 0 && token.equals("^")) {
+                double left = parsePowerTokens(tokens, start, i);
+                double right = parsePrimaryTokens(tokens, i + 1, end);
+                return Math.pow(left, right);
+            }
+        }
+        
+        return parsePrimaryTokens(tokens, start, end);
+    }
+    
+    private double parsePrimaryTokens(List<String> tokens, int start, int end) {
+        if (start >= end) return 0.0;
+        
+        if (tokens.get(start).equals("(") && tokens.get(end - 1).equals(")")) {
+            return parseAddSubTokens(tokens, start + 1, end - 1);
+        }
+        
+        if (tokens.get(start).equals("-")) {
+            return -parsePrimaryTokens(tokens, start + 1, end);
+        }
+        
+        if (end - start == 1) {
+            return parseValue(tokens.get(start));
+        }
+        
+        if (end - start >= 3 && tokens.get(start + 1).equals("(")) {
+            String funcName = tokens.get(start);
+            StringBuilder expr = new StringBuilder(funcName).append("(");
+            for (int i = start + 2; i < end - 1; i++) {
+                expr.append(tokens.get(i));
+            }
+            expr.append(")");
+            
+            Object result = evaluateFunction(expr.toString());
+            return result instanceof Number ? ((Number) result).doubleValue() : 0.0;
+        }
+        
+        return 0.0;
+    }
+    
+    private double parseValue(String token) {
+        token = token.trim();
+        
+        try {
+            if (token.toLowerCase().startsWith("0x")) {
+                return (double) Long.parseLong(token.substring(2), 16);
+            }
+            return Double.parseDouble(token);
+        } catch (NumberFormatException e) {
+            if (token.contains("(")) {
+                int paren = token.indexOf('(');
+                String arrayName = normalizeVarName(token.substring(0, paren));
+                String indexStr = token.substring(paren + 1, token.lastIndexOf(')'));
+                int index = (int) evaluateArithmetic(indexStr);
                 
-                TypedArray array = arrays.get(name);
+                TypedArray array = arrays.get(arrayName);
                 if (array != null && index >= 0 && index < array.values.length) {
                     Object val = array.values[index];
-                    if (val instanceof Number) {
-                        return ((Number) val).doubleValue();
-                    }
+                    return val instanceof Number ? ((Number) val).doubleValue() : 0.0;
                 }
                 return 0.0;
             } else {
-                Object result = evaluateFunction(expr);
-                if (result instanceof Number) {
-                    return ((Number) result).doubleValue();
-                }
-                return 0.0;
+                String varName = normalizeVarName(token);
+                TypedValue tv = variables.get(varName);
+                return tv != null ? tv.getNumeric() : 0.0;
             }
         }
-
-        if (expr.matches("[A-Za-z][A-Za-z0-9]*(\\.[bwlqf]|\\$)?")) {
-            String varName = normalizeVarName(expr);
-            TypedValue tv = variables.get(varName);
-            if (tv != null) {
-                return tv.getNumeric();
-            }
-            return 0.0;
-        }
-
-        return 0.0;
     }
     
     private boolean evaluateCondition(String condition) {
@@ -1090,8 +1200,6 @@ public class BasicInterpreter {
         Sprite(int id, BufferedImage image) {
             this.id = id;
             this.image = image;
-            this.x = 0.0;
-            this.y = 0.0;
         }
         
         Rectangle2D getBounds() {
@@ -1140,8 +1248,6 @@ public class BasicInterpreter {
             g2d.dispose();
             
             sprites[id] = new Sprite(id, img);
-            
-            System.err.println("Created sprite " + id + " at position x=" + sprites[id].x + " y=" + sprites[id].y);
         }
         
         void showSprite(int id) {
@@ -1160,10 +1266,8 @@ public class BasicInterpreter {
         
         void moveSprite(int id, double x, double y) {
             if (sprites[id] != null) {
-                System.err.println("Before MOVE: sprite " + id + " x=" + sprites[id].x + " y=" + sprites[id].y);
                 sprites[id].x = x;
                 sprites[id].y = y;
-                System.err.println("After MOVE: sprite " + id + " x=" + sprites[id].x + " y=" + sprites[id].y);
                 graphics.requestRender();
             }
         }
@@ -1316,19 +1420,12 @@ public class BasicInterpreter {
         
         String getLastKey() {
             synchronized(this) {
-                String key = lastKey;
-                if (!key.isEmpty()) {
-                    System.err.println("getLastKey() returning: '" + key + "'");
-                }
-                return key;
+                return lastKey;
             }
         }
         
         void clearLastKey() {
             synchronized(this) {
-                if (!lastKey.isEmpty()) {
-                    System.err.println("clearLastKey() clearing: '" + lastKey + "'");
-                }
                 lastKey = "";
             }
         }
@@ -1348,7 +1445,7 @@ public class BasicInterpreter {
         void initWindow(int width, int height) {
             SwingUtilities.invokeLater(() -> {
                 if (frame == null) {
-                    frame = new JFrame("FGBasic Graphics - GPU Accelerated");
+                    frame = new JFrame("FGBasic Graphics");
                     frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
                     
                     frame.addWindowListener(new WindowAdapter() {
@@ -1622,7 +1719,7 @@ public class BasicInterpreter {
         BasicIDE(BasicInterpreter interp) {
             this.interpreter = interp;
             
-            setTitle("FGBasic IDE - GPU Accelerated");
+            setTitle("FGBasic IDE v3.0.3");
             setSize(1000, 700);
             setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
             setLayout(new BorderLayout());
@@ -1743,24 +1840,6 @@ public class BasicInterpreter {
             add(outputPanel, BorderLayout.SOUTH);
         }
         
-        private void refreshEditor() {
-            codeEditor.invalidate();
-            codeEditor.revalidate();
-            codeEditor.repaint();
-        }
-        
-        private void refreshOutput() {
-            outputArea.invalidate();
-            outputArea.revalidate();
-            outputArea.repaint();
-        }
-        
-        private void refreshAll() {
-            getContentPane().invalidate();
-            getContentPane().revalidate();
-            repaint();
-        }
-        
         private void applyTheme() {
             Color bg = currentTheme.equals("Dark") ? DARK_BG : LIGHT_BG;
             Color fg = currentTheme.equals("Dark") ? DARK_FG : LIGHT_FG;
@@ -1772,10 +1851,6 @@ public class BasicInterpreter {
             outputArea.setBackground(bg);
             outputArea.setForeground(fg);
             outputArea.setCaretColor(fg);
-            
-            refreshEditor();
-            refreshOutput();
-            refreshAll();
         }
         
         private void changeTheme() {
@@ -1800,8 +1875,6 @@ public class BasicInterpreter {
                         fontSize = size;
                         codeEditor.setFont(new Font("Monospaced", Font.PLAIN, fontSize));
                         outputArea.setFont(new Font("Monospaced", Font.PLAIN, fontSize));
-                        refreshEditor();
-                        refreshOutput();
                     }
                 } catch (NumberFormatException e) {
                     JOptionPane.showMessageDialog(this, "Invalid font size");
@@ -1817,8 +1890,6 @@ public class BasicInterpreter {
                 codeEditor.setText("");
                 outputArea.setText("");
                 interpreter.newProgram();
-                refreshEditor();
-                refreshOutput();
             }
         }
         
@@ -1838,7 +1909,6 @@ public class BasicInterpreter {
                     }
                     reader.close();
                     codeEditor.setText(sb.toString());
-                    refreshEditor();
                 } catch (IOException e) {
                     JOptionPane.showMessageDialog(this, "Error loading file: " + e.getMessage());
                 }
@@ -1870,7 +1940,6 @@ public class BasicInterpreter {
         
         private void runProgram() {
             outputArea.setText("");
-            refreshOutput();
             String code = codeEditor.getText();
             
             Thread.ofVirtual().start(() -> {
@@ -1896,109 +1965,43 @@ public class BasicInterpreter {
                 appendOutput("No program loaded\n");
             } else {
                 codeEditor.setText(listing);
-                refreshEditor();
             }
         }
         
         private void showAbout() {
             JOptionPane.showMessageDialog(this,
-                """
-                FGBasic Interpreter v3.0 - GPU Accelerated (Java 24)
-                WITH CANVAS INVALIDATION SUPPORT
-                Written by Franco Gaetan aka R-C-MAN
-                Early Alpha Release Oct. 2025
-                https://github.com/rcman/FGBASIC
-                
-                Features:
-                - Native graphics rendering with hardware acceleration
-                - Canvas invalidation for smooth updates
-                - 256 sprites with collision detection
-                - Multiple screen modes (320x240 to 1920x1080)
-                - Label-based programming with GOTO/GOSUB
-                - Typed variables (.b, .w, .l, .q, .f, $)
-                - WHILE/WEND loops
-                - INKEY$ for keyboard input
-                - TEXT command for graphics screen output
-                
-                Press F5 to run programs
-                """,
-                "About FGBasic", JOptionPane.INFORMATION_MESSAGE);
+                "FGBasic v3.0.3 - Fixed Tokenization\n\n" +
+                "NEW: Spaces optional in expressions!\n" +
+                "x=x+1 works\n" +
+                "IF x>10 THEN y=20 works\n" +
+                "FOR i=1 TO 10 works\n\n" +
+                "Press F5 to run",
+                "About", JOptionPane.INFORMATION_MESSAGE);
         }
         
         private void showCommands() {
-            javax.swing.JTextArea textArea = new javax.swing.JTextArea(
-                """
-                Graphics Commands:
-                MODE n / SCREEN n - Set screen mode (0-9)
-                CLS - Clear screen
-                LINE x1,y1,x2,y2[,color] - Draw line
-                CIRCLE x,y,radius[,color] - Draw circle
-                BOX x,y,w,h[,color] - Draw filled box
-                PIXEL x,y[,color] - Set pixel
-                TEXT x,y,string - Draw text on graphics screen
-                COLOR r,g,b[,a] - Set current color
-                
-                Sprite Commands:
-                SPRITE LOAD id,filename - Load sprite from file
-                SPRITE CREATE id,w,h[,color] - Create sprite
-                SPRITE SHOW id / HIDE id - Show/hide sprite
-                SPRITE MOVE id,x,y - Move to position
-                SPRITE MOVEBY id,dx,dy - Move by offset
-                SPRITE SCALE id,sx[,sy] - Scale sprite
-                SPRITE ROTATE id,angle - Rotate sprite
-                SPRITE FLIPH id / FLIPV id - Flip horizontally/vertically
-                SPRITE COLLISION id1,id2 - Check collision
-                SPRITE SETPIXEL id,x,y,color - Set pixel in sprite
-                
-                Control Flow:
-                FOR var = start TO end [STEP n]
-                WHILE condition
-                IF condition THEN statement
-                GOTO label/line
-                GOSUB label/line
-                
-                Input:
-                INKEY$ - Get last keypress (returns "" if none)
-                
-                Colors are in ARGB hex format: 0xAARRGGBB
-                Example: 0xFFFF0000 = opaque red
-                """);
-            
-            textArea.setEditable(false);
-            textArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
-            
-            JScrollPane scrollPane = new JScrollPane(textArea);
-            scrollPane.setPreferredSize(new Dimension(600, 400));
-            
-            JOptionPane.showMessageDialog(this, scrollPane,
-                "Command Reference", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(this,
+                "Commands:\n" +
+                "PRINT, LET, INPUT, IF...THEN\n" +
+                "FOR...NEXT, WHILE...WEND\n" +
+                "GOTO, GOSUB, RETURN\n" +
+                "LINE, CIRCLE, BOX, PIXEL\n" +
+                "SPRITE commands\n\n" +
+                "NEW: No spaces needed!\n" +
+                "x=x+1\n" +
+                "FOR i=1TO10",
+                "Commands", JOptionPane.INFORMATION_MESSAGE);
         }
         
         private void showVariableTypes() {
-            javax.swing.JTextArea textArea = new javax.swing.JTextArea(
-                """
-                Variable Type Suffixes:
-                
-                .b (Byte)   - 8-bit signed integer (-128 to 127)
-                .w (Word)   - 16-bit signed integer (-32768 to 32767)
-                .l (Long)   - 32-bit signed integer
-                .q (Quick)  - 16.16 fixed point
-                .f (Float)  - Floating point (default)
-                $  (String) - Text string
-                
-                Examples:
-                x.b = 100     ' Byte variable
-                count.w = 5000 ' Word variable
-                score.l = 1000000 ' Long variable
-                speed.q = 2.5 ' Fixed point
-                value.f = 3.14159 ' Float
-                name$ = "Hello" ' String
-                """);
-            
-            textArea.setEditable(false);
-            textArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
-            
-            JOptionPane.showMessageDialog(this, new JScrollPane(textArea),
+            JOptionPane.showMessageDialog(this,
+                "Variable Types:\n" +
+                ".b (Byte)\n" +
+                ".w (Word)\n" +
+                ".l (Long)\n" +
+                ".q (Quick)\n" +
+                ".f (Float)\n" +
+                "$  (String)",
                 "Variable Types", JOptionPane.INFORMATION_MESSAGE);
         }
         
@@ -2006,9 +2009,6 @@ public class BasicInterpreter {
             SwingUtilities.invokeLater(() -> {
                 outputArea.append(text);
                 outputArea.setCaretPosition(outputArea.getDocument().getLength());
-                outputArea.invalidate();
-                outputArea.revalidate();
-                outputArea.repaint();
             });
         }
         
@@ -2016,9 +2016,6 @@ public class BasicInterpreter {
             SwingUtilities.invokeLater(() -> {
                 outputArea.append("[ERROR] " + text);
                 outputArea.setCaretPosition(outputArea.getDocument().getLength());
-                outputArea.invalidate();
-                outputArea.revalidate();
-                outputArea.repaint();
             });
         }
     }
@@ -2031,6 +2028,4 @@ public class BasicInterpreter {
         basic.graphics.setSpriteEngine(basic.sprites);
         basic.startIDE();
     }
-
-
 }
