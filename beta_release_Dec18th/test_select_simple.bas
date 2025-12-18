@@ -1,0 +1,6 @@
+LET X = 2
+SELECT CASE X
+CASE 2
+PRINT "Matched 2"
+END SELECT
+PRINT "Done"

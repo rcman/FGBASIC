@@ -1,0 +1,1466 @@
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.io.*;
+
+public class Interpreter {
+    private List<CodeLine> lines;
+    private Map<String, Double> variables;
+    private Map<String, String> stringVars;
+    private Map<String, double[]> arrays;
+    private Stack<ForLoop> forStack;
+    private Stack<WhileLoop> whileStack;
+    private Stack<DoLoop> doStack;
+    private Stack<Integer> gosubStack;
+    private Map<String, Integer> labels;
+    private Map<String, UserFunction> userFunctions;
+    private GraphicsWindow graphics;
+    private SoundSystem sound;
+    private SpriteSystem sprites;
+    private TurtleGraphics turtle;
+    private InputSystem input;
+    private Graphics3D graphics3D;
+    private NetworkSystem network;
+    private ExpressionParser expressionParser;
+    private DebugPanel debugPanel;
+    private Set<Integer> breakpoints;
+
+    private List<String> dataStatements;
+    private int dataPointer;
+
+    private int currentLine;
+    private boolean running;
+    private boolean stepMode;
+    private boolean waitingForStep;
+    private Random random;
+    private boolean turtleMode;
+
+    public Interpreter() {
+        lines = new ArrayList<>();
+        variables = new ConcurrentHashMap<>();
+        stringVars = new ConcurrentHashMap<>();
+        arrays = new ConcurrentHashMap<>();
+        forStack = new Stack<>();
+        whileStack = new Stack<>();
+        doStack = new Stack<>();
+        gosubStack = new Stack<>();
+        labels = new HashMap<>();
+        userFunctions = new HashMap<>();
+        breakpoints = new HashSet<>();
+        dataStatements = new ArrayList<>();
+        sound = new SoundSystem();
+        sprites = new SpriteSystem();
+        network = new NetworkSystem();
+        random = new Random();
+        running = false;
+        stepMode = false;
+        waitingForStep = false;
+        turtleMode = false;
+        dataPointer = 0;
+
+        expressionParser = new ExpressionParser(variables, arrays);
+        expressionParser.setStringVars(stringVars);
+        expressionParser.setUserFunctions(userFunctions);
+        expressionParser.setInterpreter(this);
+    }
+
+    public void setGraphicsWindow(GraphicsWindow gfx) {
+        this.graphics = gfx;
+        this.sprites = gfx.getSpriteSystem();
+        this.input = gfx.getInputSystem();
+        this.turtle = new TurtleGraphics(gfx);
+        this.graphics3D = new Graphics3D(gfx);
+    }
+
+    public void setDebugPanel(DebugPanel panel) {
+        this.debugPanel = panel;
+    }
+
+    public void setStepMode(boolean enabled) {
+        this.stepMode = enabled;
+        this.waitingForStep = enabled;
+    }
+
+    public void step() {
+        waitingForStep = false;
+    }
+
+    public void toggleBreakpoint(int line) {
+        if (breakpoints.contains(line)) {
+            breakpoints.remove(line);
+        } else {
+            breakpoints.add(line);
+        }
+    }
+
+    public Set<Integer> getBreakpoints() {
+        return breakpoints;
+    }
+
+    public Map<String, Double> getVariables() {
+        return variables;
+    }
+
+    public int getCurrentLine() {
+        return currentLine;
+    }
+
+    public void clear() {
+        lines.clear();
+        variables.clear();
+        stringVars.clear();
+        arrays.clear();
+        forStack.clear();
+        whileStack.clear();
+        doStack.clear();
+        gosubStack.clear();
+        labels.clear();
+        userFunctions.clear();
+        breakpoints.clear();
+        dataStatements.clear();
+        sprites.clearAll();
+        dataPointer = 0;
+        running = false;
+        stepMode = false;
+        waitingForStep = false;
+        turtleMode = false;
+        expressionParser = new ExpressionParser(variables, arrays);
+        expressionParser.setStringVars(stringVars);
+        expressionParser.setUserFunctions(userFunctions);
+        expressionParser.setInterpreter(this);
+    }
+
+    public void loadProgram(String code) {
+        clear();
+        String[] codeLines = code.split("\n");
+
+        for (String line : codeLines) {
+            line = line.trim();
+            if (line.isEmpty() || line.startsWith("'") || line.startsWith("REM")) {
+                continue;
+            }
+
+            // Check for DATA statement
+            if (line.toUpperCase().startsWith("DATA ") || line.matches("\\d+\\s+DATA\\s+.*")) {
+                String dataLine = line;
+                if (line.matches("\\d+.*")) {
+                    dataLine = line.replaceFirst("\\d+\\s+", "");
+                }
+                if (dataLine.toUpperCase().startsWith("DATA ")) {
+                    String data = dataLine.substring(5).trim();
+                    String[] items = data.split(",");
+                    for (String item : items) {
+                        dataStatements.add(item.trim());
+                    }
+                }
+                continue;
+            }
+
+            CodeLine codeLine = new CodeLine();
+
+            // Check for line number
+            String[] parts = line.split("\\s+", 2);
+            if (parts.length > 0 && parts[0].matches("\\d+")) {
+                codeLine.lineNumber = Integer.parseInt(parts[0]);
+                codeLine.code = parts.length > 1 ? parts[1] : "";
+            } else if (parts[0].matches("[A-Za-z_]\\w*:")) {
+                // Label
+                codeLine.label = parts[0].substring(0, parts[0].length() - 1);
+                codeLine.code = parts.length > 1 ? parts[1] : "";
+                labels.put(codeLine.label.toUpperCase(), lines.size());
+            } else {
+                codeLine.code = line;
+            }
+
+            lines.add(codeLine);
+        }
+
+        // Sort by line number
+        lines.sort((a, b) -> {
+            if (a.lineNumber != b.lineNumber) {
+                return Integer.compare(a.lineNumber, b.lineNumber);
+            }
+            return 0;
+        });
+
+        // Build label map
+        for (int i = 0; i < lines.size(); i++) {
+            CodeLine cl = lines.get(i);
+            if (cl.label != null) {
+                labels.put(cl.label.toUpperCase(), i);
+            }
+            if (cl.lineNumber > 0) {
+                labels.put(String.valueOf(cl.lineNumber), i);
+            }
+        }
+    }
+
+    public void run() throws Exception {
+        running = true;
+        currentLine = 0;
+
+        try {
+            while (running && currentLine < lines.size()) {
+                // Check for interruption
+                if (Thread.currentThread().isInterrupted()) {
+                    running = false;
+                    break;
+                }
+
+                // Check breakpoints
+                if (breakpoints.contains(currentLine)) {
+                    stepMode = true;
+                    waitingForStep = true;
+                }
+
+                // Wait for step if in step mode
+                while (stepMode && waitingForStep && running) {
+                    if (Thread.currentThread().isInterrupted()) {
+                        running = false;
+                        break;
+                    }
+                    Thread.sleep(50);
+                }
+
+                if (!running) break;
+
+                executeLine(lines.get(currentLine).code);
+                currentLine++;
+
+                if (stepMode) {
+                    waitingForStep = true;
+                }
+
+                Thread.sleep(1);
+            }
+        } catch (InterruptedException e) {
+            // Thread was interrupted - clean shutdown
+            running = false;
+            Thread.currentThread().interrupt(); // Preserve interrupt status
+        } finally {
+            running = false;
+        }
+    }
+
+    public void stop() {
+        running = false;
+    }
+
+    private void executeLine(String line) throws Exception {
+        if (line.isEmpty()) return;
+
+        CommandParser parser = new CommandParser(line);
+        String cmd = parser.getCommand().toUpperCase();
+
+        switch (cmd) {
+            case "PRINT":
+                executePrint(parser);
+                break;
+            case "LET":
+                executeLet(parser);
+                break;
+            case "INPUT":
+                executeInput(parser);
+                break;
+            case "IF":
+                executeIf(parser);
+                break;
+            case "SELECT":
+                executeSelect(parser);
+                break;
+            case "CASE":
+                executeCase(parser);
+                break;
+            case "WHILE":
+                executeWhile(parser);
+                break;
+            case "WEND":
+                executeWend();
+                break;
+            case "DO":
+                executeDo(parser);
+                break;
+            case "LOOP":
+                executeLoop(parser);
+                break;
+            case "DEF":
+                executeDef(parser);
+                break;
+            case "DATA":
+                // Already handled in loadProgram
+                break;
+            case "READ":
+                executeRead(parser);
+                break;
+            case "RESTORE":
+                executeRestore(parser);
+                break;
+            case "GOTO":
+            case "GO":
+                executeGoto(parser);
+                break;
+            case "GOSUB":
+                executeGosub(parser);
+                break;
+            case "RETURN":
+                executeReturn();
+                break;
+            case "FOR":
+                executeFor(parser);
+                break;
+            case "NEXT":
+                executeNext(parser);
+                break;
+            case "DIM":
+                executeDim(parser);
+                break;
+            case "CLS":
+                if (graphics != null) {
+                    graphics.clear();
+                } else {
+                    System.err.println("Graphics not initialized");
+                }
+                break;
+            case "COLOR":
+            case "COLOUR":
+                if (graphics != null) {
+                    executeColor(parser);
+                } else {
+                    System.err.println("Graphics not initialized");
+                }
+                break;
+            case "LINE":
+                if (graphics != null) {
+                    executeLineCommand(parser);
+                } else {
+                    System.err.println("Graphics not initialized");
+                }
+                break;
+            case "CIRCLE":
+                if (graphics != null) {
+                    executeCircle(parser);
+                } else {
+                    System.err.println("Graphics not initialized");
+                }
+                break;
+            case "ELLIPSE":
+                if (graphics != null) {
+                    executeEllipse(parser);
+                } else {
+                    System.err.println("Graphics not initialized");
+                }
+                break;
+            case "POLYGON":
+                if (graphics != null) {
+                    executePolygon(parser);
+                } else {
+                    System.err.println("Graphics not initialized");
+                }
+                break;
+            case "RECT":
+            case "BOX":
+                if (graphics != null) {
+                    executeRect(parser);
+                } else {
+                    System.err.println("Graphics not initialized");
+                }
+                break;
+            case "TEXT":
+                if (graphics != null) {
+                    executeText(parser);
+                } else {
+                    System.err.println("Graphics not initialized");
+                }
+                break;
+            case "PSET":
+            case "PIXEL":
+                if (graphics != null) {
+                    executePixel(parser);
+                } else {
+                    System.err.println("Graphics not initialized");
+                }
+                break;
+            case "PAGE":
+                if (graphics != null) {
+                    executePage(parser);
+                } else {
+                    System.err.println("Graphics not initialized");
+                }
+                break;
+            case "SOUND":
+            case "TONE":
+                executeSound(parser);
+                break;
+            case "WAVEFORM":
+                executeWaveform(parser);
+                break;
+            case "BEEP":
+                executeBeep(parser);
+                break;
+            case "PLAY":
+                executePlay(parser);
+                break;
+            case "RECORD":
+                executeRecord(parser);
+                break;
+            case "PLAYBACK":
+                executePlayback(parser);
+                break;
+            case "SPRITE":
+                if (graphics != null) {
+                    executeSprite(parser);
+                } else {
+                    System.err.println("Graphics not initialized");
+                }
+                break;
+            case "COLLISION":
+                if (graphics != null) {
+                    executeCollision(parser);
+                } else {
+                    System.err.println("Graphics not initialized");
+                }
+                break;
+            case "TURTLE":
+                executeTurtle(parser);
+                break;
+            case "FORWARD":
+            case "FD":
+                if (turtle != null && graphics != null) {
+                    turtle.forward(evaluateExpression(parser.getRemainder()));
+                    graphics.repaint();
+                }
+                break;
+            case "BACKWARD":
+            case "BK":
+                if (turtle != null && graphics != null) {
+                    turtle.backward(evaluateExpression(parser.getRemainder()));
+                    graphics.repaint();
+                }
+                break;
+            case "RIGHT":
+            case "RT":
+                if (turtle != null) {
+                    turtle.right(evaluateExpression(parser.getRemainder()));
+                }
+                break;
+            case "LEFT":
+            case "LT":
+                if (turtle != null) {
+                    turtle.left(evaluateExpression(parser.getRemainder()));
+                }
+                break;
+            case "PENUP":
+            case "PU":
+                if (turtle != null) {
+                    turtle.penUp();
+                }
+                break;
+            case "PENDOWN":
+            case "PD":
+                if (turtle != null) {
+                    turtle.penDown();
+                }
+                break;
+            case "HOME":
+                if (turtle != null && graphics != null) {
+                    turtle.home();
+                    graphics.repaint();
+                }
+                break;
+            case "BOX3D":
+                if (graphics != null) {
+                    executeBox3D(parser);
+                }
+                break;
+            case "SPHERE3D":
+                if (graphics != null) {
+                    executeSphere3D(parser);
+                }
+                break;
+            case "ROTATE3D":
+                if (graphics3D != null) {
+                    executeRotate3D(parser);
+                }
+                break;
+            case "NETOPEN":
+                executeNetOpen(parser);
+                break;
+            case "NETSEND":
+                executeNetSend(parser);
+                break;
+            case "NETRECV":
+                executeNetRecv(parser);
+                break;
+            case "NETCLOSE":
+                executeNetClose(parser);
+                break;
+            case "MOUSEX":
+                if (input != null) {
+                    variables.put("MOUSEX", (double)input.getMouseX());
+                }
+                break;
+            case "MOUSEY":
+                if (input != null) {
+                    variables.put("MOUSEY", (double)input.getMouseY());
+                }
+                break;
+            case "MOUSEBUTTON":
+                if (input != null) {
+                    variables.put("MOUSEBUTTON", input.isMouseButton(1) ? 1.0 : 0.0);
+                }
+                break;
+            case "KEYPRESS":
+                if (input != null) {
+                    variables.put("KEYPRESS", (double)input.getLastKey());
+                }
+                break;
+            case "LOAD":
+                executeLoad(parser);
+                break;
+            case "SAVE":
+                executeSave(parser);
+                break;
+            case "END":
+                running = false;
+                break;
+            case "WAIT":
+                executeWait(parser);
+                break;
+            case "FONT":
+                if (graphics != null) {
+                    executeFont(parser);
+                }
+                break;
+            default:
+                // Try as assignment
+                if (line.contains("=")) {
+                    executeLet(new CommandParser("LET " + line));
+                }
+        }
+    }
+
+    private void executePrint(CommandParser parser) {
+        String expr = parser.getRemainder();
+        if (expr.isEmpty()) {
+            System.out.println();
+            return;
+        }
+
+        String[] parts = expr.split(";");
+        for (int i = 0; i < parts.length; i++) {
+            String part = parts[i].trim();
+            if (part.startsWith("\"") && part.endsWith("\"")) {
+                System.out.print(part.substring(1, part.length() - 1));
+            } else if (part.endsWith("$") || part.contains("$")) {
+                // String variable or expression
+                System.out.print(expressionParser.evaluateString(part));
+            } else {
+                System.out.print(evaluateExpression(part));
+            }
+            if (i < parts.length - 1) {
+                System.out.print(" ");
+            }
+        }
+        System.out.println();
+    }
+
+    private void executeLet(CommandParser parser) {
+        String remainder = parser.getRemainder();
+        if (remainder.startsWith("LET ")) {
+            remainder = remainder.substring(4);
+        }
+
+        int eqPos = remainder.indexOf('=');
+        if (eqPos == -1) return;
+
+        String varName = remainder.substring(0, eqPos).trim();
+        String expr = remainder.substring(eqPos + 1).trim();
+
+        // Check for array assignment
+        if (varName.contains("(") && varName.endsWith(")")) {
+            int parenPos = varName.indexOf('(');
+            String arrayName = varName.substring(0, parenPos).trim().toUpperCase();
+            String indexExpr = varName.substring(parenPos + 1, varName.length() - 1);
+
+            if (arrays.containsKey(arrayName)) {
+                int index = (int)evaluateExpression(indexExpr);
+                double value = evaluateExpression(expr);
+                double[] array = arrays.get(arrayName);
+
+                if (index >= 0 && index < array.length) {
+                    array[index] = value;
+                } else {
+                    throw new RuntimeException("Array index out of bounds: " + index +
+                        " (array size: " + array.length + ")");
+                }
+            } else {
+                throw new RuntimeException("Array not defined: " + arrayName);
+            }
+            return;
+        }
+
+        // Check if it's a string variable (ends with $)
+        if (varName.endsWith("$")) {
+            String value = expressionParser.evaluateString(expr);
+            stringVars.put(varName.toUpperCase(), value);
+        } else {
+            double value = evaluateExpression(expr);
+            variables.put(varName.toUpperCase(), value);
+        }
+    }
+
+    private void executeInput(CommandParser parser) {
+        // For simplicity in this implementation
+        String varName = parser.getRemainder().trim();
+        variables.put(varName.toUpperCase(), 0.0);
+    }
+
+    private void executeIf(CommandParser parser) throws Exception {
+        String remainder = parser.getRemainder();
+        int thenPos = remainder.toUpperCase().indexOf("THEN");
+        if (thenPos == -1) return;
+
+        String condition = remainder.substring(0, thenPos).trim();
+        String afterThen = remainder.substring(thenPos + 4).trim();
+
+        String thenPart = afterThen;
+        String elsePart = "";
+
+        int elsePos = afterThen.toUpperCase().indexOf(" ELSE ");
+        if (elsePos != -1) {
+            thenPart = afterThen.substring(0, elsePos).trim();
+            elsePart = afterThen.substring(elsePos + 6).trim();
+        }
+
+        if (evaluateCondition(condition)) {
+            if (!thenPart.isEmpty()) {
+                executeLine(thenPart);
+            }
+        } else {
+            if (!elsePart.isEmpty()) {
+                executeLine(elsePart);
+            }
+        }
+    }
+
+    private void executeSelect(CommandParser parser) throws Exception {
+        String expr = parser.getRemainder().trim();
+        if (expr.toUpperCase().startsWith("CASE ")) {
+            expr = expr.substring(5).trim();
+        }
+
+        double selectValue = evaluateExpression(expr);
+        variables.put("__SELECT_VALUE__", selectValue);
+
+        // Find matching CASE
+        boolean matched = false;
+        for (int i = currentLine + 1; i < lines.size(); i++) {
+            String line = lines.get(i).code.trim().toUpperCase();
+            if (line.startsWith("END SELECT") || line.equals("ENDSELECT")) {
+                currentLine = i;
+                break;
+            }
+            if (line.startsWith("CASE ")) {
+                String caseExpr = lines.get(i).code.substring(5).trim();
+                if (caseExpr.toUpperCase().equals("ELSE")) {
+                    if (!matched) {
+                        currentLine = i;
+                        matched = true;
+                    }
+                } else {
+                    double caseValue = evaluateExpression(caseExpr);
+                    if (Math.abs(caseValue - selectValue) < 0.0001) {
+                        currentLine = i;
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    private void executeCase(CommandParser parser) throws Exception {
+        // Execute lines until next CASE or END SELECT
+        for (int i = currentLine + 1; i < lines.size(); i++) {
+            String line = lines.get(i).code.trim().toUpperCase();
+            if (line.startsWith("CASE ") || line.startsWith("END SELECT") || line.equals("ENDSELECT")) {
+                currentLine = i - 1;
+                break;
+            }
+            executeLine(lines.get(i).code);
+            currentLine = i;
+        }
+    }
+
+    private void executeGoto(CommandParser parser) {
+        String target = parser.getRemainder().trim();
+        if (target.toUpperCase().startsWith("TO ")) {
+            target = target.substring(3).trim();
+        }
+
+        Integer lineIndex = labels.get(target.toUpperCase());
+        if (lineIndex != null) {
+            currentLine = lineIndex - 1;
+        }
+    }
+
+    private void executeGosub(CommandParser parser) {
+        String target = parser.getRemainder().trim();
+        gosubStack.push(currentLine);
+
+        Integer lineIndex = labels.get(target.toUpperCase());
+        if (lineIndex != null) {
+            currentLine = lineIndex - 1;
+        }
+    }
+
+    private void executeReturn() {
+        if (!gosubStack.isEmpty()) {
+            currentLine = gosubStack.pop();
+        }
+    }
+
+    private void executeFor(CommandParser parser) {
+        String remainder = parser.getRemainder();
+        String[] parts = remainder.split("=");
+        if (parts.length < 2) return;
+
+        String varName = parts[0].trim().toUpperCase();
+        String rest = parts[1];
+
+        int toPos = rest.toUpperCase().indexOf("TO");
+        if (toPos == -1) return;
+
+        double start = evaluateExpression(rest.substring(0, toPos).trim());
+        String afterTo = rest.substring(toPos + 2).trim();
+
+        double end;
+        double step = 1.0;
+
+        int stepPos = afterTo.toUpperCase().indexOf("STEP");
+        if (stepPos != -1) {
+            end = evaluateExpression(afterTo.substring(0, stepPos).trim());
+            step = evaluateExpression(afterTo.substring(stepPos + 4).trim());
+        } else {
+            end = evaluateExpression(afterTo);
+        }
+
+        variables.put(varName, start);
+
+        ForLoop loop = new ForLoop();
+        loop.varName = varName;
+        loop.targetValue = end;
+        loop.stepValue = step;
+        loop.startLine = currentLine;
+
+        forStack.push(loop);
+    }
+
+    private void executeNext(CommandParser parser) {
+        if (forStack.isEmpty()) return;
+
+        ForLoop loop = forStack.peek();
+        double current = variables.getOrDefault(loop.varName, 0.0);
+        current += loop.stepValue;
+        variables.put(loop.varName, current);
+
+        boolean done = (loop.stepValue > 0 && current > loop.targetValue) ||
+                      (loop.stepValue < 0 && current < loop.targetValue);
+
+        if (!done) {
+            currentLine = loop.startLine;
+        } else {
+            forStack.pop();
+        }
+    }
+
+    private void executeWhile(CommandParser parser) {
+        String condition = parser.getRemainder().trim();
+        WhileLoop loop = new WhileLoop();
+        loop.startLine = currentLine;
+        loop.condition = condition;
+        whileStack.push(loop);
+
+        if (!evaluateCondition(condition)) {
+            // Skip to WEND
+            skipToWend();
+        }
+    }
+
+    private void skipToWend() {
+        int depth = 1;
+        for (int i = currentLine + 1; i < lines.size(); i++) {
+            String cmd = lines.get(i).code.trim().toUpperCase();
+            if (cmd.startsWith("WHILE")) depth++;
+            if (cmd.equals("WEND")) {
+                depth--;
+                if (depth == 0) {
+                    currentLine = i;
+                    if (!whileStack.isEmpty()) {
+                        whileStack.pop();
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    private void executeWend() {
+        if (whileStack.isEmpty()) return;
+
+        WhileLoop loop = whileStack.peek();
+        if (evaluateCondition(loop.condition)) {
+            currentLine = loop.startLine;
+        } else {
+            whileStack.pop();
+        }
+    }
+
+    private void executeDo(CommandParser parser) {
+        DoLoop loop = new DoLoop();
+        loop.startLine = currentLine;
+        String condition = parser.getRemainder().trim();
+        loop.condition = condition;
+
+        String conditionUpper = condition.toUpperCase().trim();
+        loop.isWhile = conditionUpper.startsWith("WHILE");
+        loop.isUntil = conditionUpper.startsWith("UNTIL");
+
+        if (loop.isWhile) {
+            // Find where WHILE ends (after the keyword and any whitespace)
+            int whileEnd = 5; // "WHILE".length()
+            while (whileEnd < condition.length() &&
+                   Character.isWhitespace(condition.charAt(whileEnd))) {
+                whileEnd++;
+            }
+            loop.condition = whileEnd < condition.length() ?
+                condition.substring(whileEnd).trim() : "";
+        } else if (loop.isUntil) {
+            int untilEnd = 5; // "UNTIL".length()
+            while (untilEnd < condition.length() &&
+                   Character.isWhitespace(condition.charAt(untilEnd))) {
+                untilEnd++;
+            }
+            loop.condition = untilEnd < condition.length() ?
+                condition.substring(untilEnd).trim() : "";
+        }
+
+        doStack.push(loop);
+
+        // Check condition at top if DO WHILE
+        if (loop.isWhile && !loop.condition.isEmpty()) {
+            if (!evaluateCondition(loop.condition)) {
+                skipToLoop();
+            }
+        } else if (loop.isUntil && !loop.condition.isEmpty()) {
+            if (evaluateCondition(loop.condition)) {
+                skipToLoop();
+            }
+        }
+    }
+
+    private void skipToLoop() {
+        int depth = 1;
+        for (int i = currentLine + 1; i < lines.size(); i++) {
+            String cmd = lines.get(i).code.trim().toUpperCase();
+            if (cmd.startsWith("DO")) depth++;
+            if (cmd.startsWith("LOOP")) {
+                depth--;
+                if (depth == 0) {
+                    currentLine = i;
+                    if (!doStack.isEmpty()) {
+                        doStack.pop();
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    private void executeLoop(CommandParser parser) {
+        if (doStack.isEmpty()) return;
+
+        DoLoop loop = doStack.peek();
+        String condition = parser.getRemainder().trim();
+
+        String conditionUpper = condition.toUpperCase().trim();
+        boolean isWhile = conditionUpper.startsWith("WHILE");
+        boolean isUntil = conditionUpper.startsWith("UNTIL");
+
+        if (isWhile) {
+            int whileEnd = 5;
+            while (whileEnd < condition.length() &&
+                   Character.isWhitespace(condition.charAt(whileEnd))) {
+                whileEnd++;
+            }
+            condition = whileEnd < condition.length() ?
+                condition.substring(whileEnd).trim() : "";
+
+            if (evaluateCondition(condition)) {
+                currentLine = loop.startLine;
+            } else {
+                doStack.pop();
+            }
+        } else if (isUntil) {
+            int untilEnd = 5;
+            while (untilEnd < condition.length() &&
+                   Character.isWhitespace(condition.charAt(untilEnd))) {
+                untilEnd++;
+            }
+            condition = untilEnd < condition.length() ?
+                condition.substring(untilEnd).trim() : "";
+
+            if (!evaluateCondition(condition)) {
+                currentLine = loop.startLine;
+            } else {
+                doStack.pop();
+            }
+        } else if (!loop.condition.isEmpty()) {
+            // Condition was at DO statement
+            if (loop.isWhile) {
+                if (evaluateCondition(loop.condition)) {
+                    currentLine = loop.startLine;
+                } else {
+                    doStack.pop();
+                }
+            } else if (loop.isUntil) {
+                if (!evaluateCondition(loop.condition)) {
+                    currentLine = loop.startLine;
+                } else {
+                    doStack.pop();
+                }
+            }
+        } else {
+            // Infinite loop
+            currentLine = loop.startLine;
+        }
+    }
+
+    private void executeDim(CommandParser parser) {
+        String remainder = parser.getRemainder();
+        String[] parts = remainder.split("\\(");
+        if (parts.length < 2) return;
+
+        String varName = parts[0].trim().toUpperCase();
+        String dimensions = parts[1].replace(")", "").trim();
+
+        int size = (int)evaluateExpression(dimensions);
+        if (size < 0) {
+            throw new RuntimeException("Array size cannot be negative: " + size);
+        }
+        arrays.put(varName, new double[size]);
+    }
+
+    private void executeDef(CommandParser parser) {
+        String remainder = parser.getRemainder().trim();
+        if (!remainder.toUpperCase().startsWith("FN")) return;
+
+        remainder = remainder.substring(2).trim();
+        int parenPos = remainder.indexOf('(');
+        if (parenPos == -1) return;
+
+        String funcName = remainder.substring(0, parenPos).trim().toUpperCase();
+        int closeParen = remainder.indexOf(')');
+        String params = remainder.substring(parenPos + 1, closeParen);
+        int eqPos = remainder.indexOf('=', closeParen);
+        String expr = remainder.substring(eqPos + 1).trim();
+
+        UserFunction func = new UserFunction();
+        func.name = funcName;
+        func.parameters = new ArrayList<>(Arrays.asList(params.split(",")));
+        for (int i = 0; i < func.parameters.size(); i++) {
+            func.parameters.set(i, func.parameters.get(i).trim().toUpperCase());
+        }
+        func.expression = expr;
+
+        userFunctions.put(funcName, func);
+    }
+
+    private void executeRead(CommandParser parser) {
+        String[] vars = parser.getRemainder().split(",");
+        for (String var : vars) {
+            var = var.trim();
+            if (dataPointer < dataStatements.size()) {
+                String data = dataStatements.get(dataPointer++);
+
+                if (var.endsWith("$")) {
+                    // String variable
+                    if (data.startsWith("\"") && data.endsWith("\"")) {
+                        data = data.substring(1, data.length() - 1);
+			}
+                    stringVars.put(var.toUpperCase(), data);
+                } else {
+                    // Numeric variable
+                    double value = evaluateExpression(data);
+                    variables.put(var.toUpperCase(), value);
+                }
+            }
+        }
+    }
+
+    private void executeRestore(CommandParser parser) {
+        String remainder = parser.getRemainder().trim();
+        if (remainder.isEmpty()) {
+            dataPointer = 0;
+        } else {
+            int lineNum = (int)evaluateExpression(remainder);
+            // For simplicity, just reset to beginning
+            dataPointer = 0;
+        }
+    }
+
+    private void executeColor(CommandParser parser) {
+        String[] parts = parser.getRemainder().split(",");
+        if (parts.length >= 3) {
+            int r = (int)evaluateExpression(parts[0].trim());
+            int g = (int)evaluateExpression(parts[1].trim());
+            int b = (int)evaluateExpression(parts[2].trim());
+            graphics.setColor(r, g, b);
+        }
+    }
+
+    private void executeLineCommand(CommandParser parser) {
+        String[] parts = parser.getRemainder().split(",");
+        if (parts.length >= 4) {
+            int x1 = (int)evaluateExpression(parts[0].trim());
+            int y1 = (int)evaluateExpression(parts[1].trim());
+            int x2 = (int)evaluateExpression(parts[2].trim());
+            int y2 = (int)evaluateExpression(parts[3].trim());
+            graphics.drawLine(x1, y1, x2, y2);
+        }
+    }
+
+    private void executeCircle(CommandParser parser) {
+        String[] parts = parser.getRemainder().split(",");
+        if (parts.length >= 3) {
+            int x = (int)evaluateExpression(parts[0].trim());
+            int y = (int)evaluateExpression(parts[1].trim());
+            int r = (int)evaluateExpression(parts[2].trim());
+
+            boolean fill = parts.length >= 4 && evaluateExpression(parts[3].trim()) != 0;
+
+            if (fill) {
+                graphics.fillCircle(x, y, r);
+            } else {
+                graphics.drawCircle(x, y, r);
+            }
+        }
+    }
+
+    private void executeEllipse(CommandParser parser) {
+        String[] parts = parser.getRemainder().split(",");
+        if (parts.length >= 3) {
+            int x = (int)evaluateExpression(parts[0].trim());
+            int y = (int)evaluateExpression(parts[1].trim());
+            int w = (int)evaluateExpression(parts[2].trim());
+            int h = parts.length >= 4 ? (int)evaluateExpression(parts[3].trim()) : w;
+
+            boolean fill = parts.length >= 5 && evaluateExpression(parts[4].trim()) != 0;
+
+            if (fill) {
+                graphics.fillEllipse(x, y, w, h);
+            } else {
+                graphics.drawEllipse(x, y, w, h);
+            }
+        }
+    }
+
+    private void executePolygon(CommandParser parser) {
+        String remainder = parser.getRemainder().trim();
+        String[] parts = remainder.split(",");
+
+        if (parts.length < 6) return; // Need at least 3 points (x1,y1,x2,y2,x3,y3)
+
+        int numPoints = parts.length / 2;
+        int[] xPoints = new int[numPoints];
+        int[] yPoints = new int[numPoints];
+
+        for (int i = 0; i < numPoints; i++) {
+            xPoints[i] = (int)evaluateExpression(parts[i * 2].trim());
+            yPoints[i] = (int)evaluateExpression(parts[i * 2 + 1].trim());
+        }
+
+        graphics.drawPolygon(xPoints, yPoints, numPoints);
+    }
+
+    private void executeRect(CommandParser parser) {
+        String[] parts = parser.getRemainder().split(",");
+        if (parts.length >= 4) {
+            int x = (int)evaluateExpression(parts[0].trim());
+            int y = (int)evaluateExpression(parts[1].trim());
+            int w = (int)evaluateExpression(parts[2].trim());
+            int h = (int)evaluateExpression(parts[3].trim());
+
+            boolean fill = parts.length >= 5 && evaluateExpression(parts[4].trim()) != 0;
+
+            if (fill) {
+                graphics.fillRect(x, y, w, h);
+            } else {
+                graphics.drawRect(x, y, w, h);
+            }
+        }
+    }
+
+    private void executeText(CommandParser parser) {
+        String remainder = parser.getRemainder();
+        String[] parts = remainder.split(",", 3);
+        if (parts.length >= 3) {
+            int x = (int)evaluateExpression(parts[0].trim());
+            int y = (int)evaluateExpression(parts[1].trim());
+            String text = parts[2].trim();
+            if (text.startsWith("\"") && text.endsWith("\"")) {
+                text = text.substring(1, text.length() - 1);
+            }
+            graphics.drawText(x, y, text);
+        }
+    }
+
+    private void executePixel(CommandParser parser) {
+        String[] parts = parser.getRemainder().split(",");
+        if (parts.length >= 2) {
+            int x = (int)evaluateExpression(parts[0].trim());
+            int y = (int)evaluateExpression(parts[1].trim());
+            graphics.drawPixel(x, y);
+        }
+    }
+
+    private void executePage(CommandParser parser) {
+        String remainder = parser.getRemainder().trim();
+        if (remainder.isEmpty()) return;
+
+        int pageNum = (int)evaluateExpression(remainder);
+        graphics.setPage(pageNum);
+    }
+
+    private void executeSound(CommandParser parser) {
+        String[] parts = parser.getRemainder().split(",");
+        if (parts.length >= 2) {
+            double freq = evaluateExpression(parts[0].trim());
+            int duration = (int)evaluateExpression(parts[1].trim());
+            double volume = parts.length >= 3 ? evaluateExpression(parts[2].trim()) / 100.0 : 0.5;
+            sound.playTone(freq, duration, volume);
+        }
+    }
+
+    private void executeWaveform(CommandParser parser) {
+        String waveform = parser.getRemainder().trim();
+        if (waveform.startsWith("\"") && waveform.endsWith("\"")) {
+            waveform = waveform.substring(1, waveform.length() - 1);
+        }
+        sound.setWaveform(waveform);
+    }
+
+    private void executeBeep(CommandParser parser) {
+        String remainder = parser.getRemainder().trim();
+        int duration = remainder.isEmpty() ? 500 : (int)evaluateExpression(remainder);
+        sound.beep(duration);
+    }
+
+    private void executePlay(CommandParser parser) {
+        String sequence = parser.getRemainder().trim();
+        if (sequence.startsWith("\"") && sequence.endsWith("\"")) {
+            sequence = sequence.substring(1, sequence.length() - 1);
+        }
+        sound.playSequence(sequence);
+    }
+
+    private void executeRecord(CommandParser parser) {
+        String remainder = parser.getRemainder().trim();
+        int duration = remainder.isEmpty() ? 5000 : (int)evaluateExpression(remainder);
+        sound.startRecording(duration);
+    }
+
+    private void executePlayback(CommandParser parser) {
+        sound.playRecording();
+    }
+
+    private void executeSprite(CommandParser parser) {
+        String remainder = parser.getRemainder();
+        String[] parts = remainder.split(",");
+
+        if (parts.length < 2) return;
+
+        String action = parts[0].trim().toUpperCase();
+        int id = (int)evaluateExpression(parts[1].trim());
+
+        switch (action) {
+            case "CREATE":
+                if (parts.length >= 4) {
+                    int width = (int)evaluateExpression(parts[2].trim());
+                    int height = (int)evaluateExpression(parts[3].trim());
+                    sprites.createSprite(id, width, height);
+                }
+                break;
+            case "LOAD":
+                if (parts.length >= 3) {
+                    String filename = parts[2].trim();
+                    if (filename.startsWith("\"") && filename.endsWith("\"")) {
+                        filename = filename.substring(1, filename.length() - 1);
+                    }
+                    try {
+                        sprites.loadSpriteImage(id, filename);
+                    } catch (Exception e) {
+                        System.err.println("Error loading sprite image: " + e.getMessage());
+                    }
+                }
+                break;
+            case "MOVE":
+                if (parts.length >= 4) {
+                    int x = (int)evaluateExpression(parts[2].trim());
+                    int y = (int)evaluateExpression(parts[3].trim());
+                    sprites.setSpritePosition(id, x, y);
+                    graphics.repaint(); // Force repaint after move
+                }
+                break;
+            case "SHOW":
+                sprites.setSpriteVisible(id, true);
+                graphics.repaint(); // Force repaint after show
+                break;
+            case "HIDE":
+                sprites.setSpriteVisible(id, false);
+                graphics.repaint(); // Force repaint after hide
+                break;
+            case "DELETE":
+                sprites.deleteSprite(id);
+                graphics.repaint(); // Force repaint after delete
+                break;
+            case "PIXEL":
+                if (parts.length >= 5 && graphics != null) {
+                    int x = (int)evaluateExpression(parts[2].trim());
+                    int y = (int)evaluateExpression(parts[3].trim());
+                    sprites.setSpritePixel(id, x, y, graphics.getCurrentColor());
+                    graphics.repaint(); // Force repaint after pixel change
+                }
+                break;
+        }
+    }
+
+    private void executeCollision(CommandParser parser) {
+        String remainder = parser.getRemainder().trim();
+        String[] parts = remainder.split(",");
+
+        if (parts.length >= 2) {
+            int id1 = (int)evaluateExpression(parts[0].trim());
+            int id2 = (int)evaluateExpression(parts[1].trim());
+
+            boolean collided = sprites.checkCollision(id1, id2);
+            variables.put("COLLISION", collided ? 1.0 : 0.0);
+        }
+    }
+
+    private void executeTurtle(CommandParser parser) {
+        String cmd = parser.getRemainder().trim().toUpperCase();
+        if (cmd.equals("ON")) {
+            turtleMode = true;
+        } else if (cmd.equals("OFF")) {
+            turtleMode = false;
+        }
+    }
+
+    private void executeBox3D(CommandParser parser) {
+        String[] parts = parser.getRemainder().split(",");
+        if (parts.length >= 6) {
+            double x = evaluateExpression(parts[0].trim());
+            double y = evaluateExpression(parts[1].trim());
+            double z = evaluateExpression(parts[2].trim());
+            double w = evaluateExpression(parts[3].trim());
+            double h = evaluateExpression(parts[4].trim());
+            double d = evaluateExpression(parts[5].trim());
+
+            graphics3D.drawBox(x, y, z, w, h, d);
+            graphics.repaint();
+        }
+    }
+
+    private void executeSphere3D(CommandParser parser) {
+        String[] parts = parser.getRemainder().split(",");
+        if (parts.length >= 4) {
+            double x = evaluateExpression(parts[0].trim());
+            double y = evaluateExpression(parts[1].trim());
+            double z = evaluateExpression(parts[2].trim());
+            double radius = evaluateExpression(parts[3].trim());
+
+            graphics3D.drawSphere(x, y, z, radius);
+            graphics.repaint();
+        }
+    }
+
+    private void executeRotate3D(CommandParser parser) {
+        String[] parts = parser.getRemainder().split(",");
+        if (parts.length >= 3) {
+            double rx = evaluateExpression(parts[0].trim());
+            double ry = evaluateExpression(parts[1].trim());
+            double rz = evaluateExpression(parts[2].trim());
+
+            graphics3D.rotate(rx, ry, rz);
+        }
+    }
+
+    private void executeNetOpen(CommandParser parser) throws Exception {
+        String[] parts = parser.getRemainder().split(",");
+        if (parts.length >= 2) {
+            String host = parts[0].trim();
+            if (host.startsWith("\"") && host.endsWith("\"")) {
+                host = host.substring(1, host.length() - 1);
+            }
+            int port = (int)evaluateExpression(parts[1].trim());
+
+            int id = parts.length >= 3 ? (int)evaluateExpression(parts[2].trim()) : 0;
+            network.openConnection(id, host, port);
+        }
+    }
+
+    private void executeNetSend(CommandParser parser) throws Exception {
+        String[] parts = parser.getRemainder().split(",", 2);
+        if (parts.length >= 2) {
+            int id = (int)evaluateExpression(parts[0].trim());
+            String data = parts[1].trim();
+            if (data.startsWith("\"") && data.endsWith("\"")) {
+                data = data.substring(1, data.length() - 1);
+            }
+            network.sendData(id, data);
+        }
+    }
+
+    private void executeNetRecv(CommandParser parser) throws Exception {
+        String[] parts = parser.getRemainder().split(",");
+        if (parts.length >= 2) {
+            int id = (int)evaluateExpression(parts[0].trim());
+            String varName = parts[1].trim().toUpperCase();
+            String data = network.receiveData(id);
+
+            if (varName.endsWith("$")) {
+                stringVars.put(varName, data);
+            } else {
+                try {
+                    variables.put(varName, Double.parseDouble(data));
+                } catch (NumberFormatException e) {
+                    variables.put(varName, 0.0);
+                }
+            }
+        }
+    }
+
+    private void executeNetClose(CommandParser parser) throws Exception {
+        String remainder = parser.getRemainder().trim();
+        int id = remainder.isEmpty() ? 0 : (int)evaluateExpression(remainder);
+        network.closeConnection(id);
+    }
+
+    private void executeWait(CommandParser parser) {
+        String remainder = parser.getRemainder().trim();
+        double seconds = evaluateExpression(remainder);
+        try {
+            Thread.sleep((long)(seconds * 1000));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private void executeFont(CommandParser parser) {
+        String remainder = parser.getRemainder().trim();
+        String[] parts = remainder.split(",");
+        
+        if (parts.length >= 2) {
+            String fontName = parts[0].trim();
+            if (fontName.startsWith("\"") && fontName.endsWith("\"")) {
+                fontName = fontName.substring(1, fontName.length() - 1);
+            }
+            int fontSize = (int)evaluateExpression(parts[1].trim());
+            
+            int fontStyle = java.awt.Font.PLAIN;
+            if (parts.length >= 3) {
+                String style = parts[2].trim().toUpperCase();
+                if (style.startsWith("\"") && style.endsWith("\"")) {
+                    style = style.substring(1, style.length() - 1);
+                }
+                
+                if (style.equals("BOLD")) {
+                    fontStyle = java.awt.Font.BOLD;
+                } else if (style.equals("ITALIC")) {
+                    fontStyle = java.awt.Font.ITALIC;
+                } else if (style.equals("BOLDITALIC") || style.equals("BOLD ITALIC")) {
+                    fontStyle = java.awt.Font.BOLD | java.awt.Font.ITALIC;
+                }
+            }
+            
+            graphics.setFont(fontName, fontSize, fontStyle);
+        }
+    }
+
+    private void executeLoad(CommandParser parser) throws Exception {
+        String filename = parser.getRemainder().trim();
+        if (filename.startsWith("\"") && filename.endsWith("\"")) {
+            filename = filename.substring(1, filename.length() - 1);
+        }
+
+        StringBuilder code = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new FileReader(filename))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                code.append(line).append("\n");
+            }
+        }
+
+        clear();
+        loadProgram(code.toString());
+    }
+
+    private void executeSave(CommandParser parser) throws Exception {
+        String filename = parser.getRemainder().trim();
+        if (filename.startsWith("\"") && filename.endsWith("\"")) {
+            filename = filename.substring(1, filename.length() - 1);
+        }
+
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(filename))) {
+            for (CodeLine line : lines) {
+                if (line.lineNumber > 0) {
+                    writer.write(line.lineNumber + " ");
+                } else if (line.label != null) {
+                    writer.write(line.label + ": ");
+                }
+                writer.write(line.code);
+                writer.newLine();
+            }
+        }
+    }
+
+    private double evaluateExpression(String expr) {
+        return expressionParser.evaluate(expr);
+    }
+
+    private boolean evaluateCondition(String condition) {
+        return expressionParser.evaluate(condition) != 0.0;
+    }
+
+    // Inner classes
+    private static class ForLoop {
+        String varName;
+        double targetValue;
+        double stepValue;
+        int startLine;
+    }
+
+    private static class WhileLoop {
+        String condition;
+        int startLine;
+    }
+
+    private static class DoLoop {
+        String condition;
+        int startLine;
+        boolean isWhile;
+        boolean isUntil;
+    }
+
+    private static class UserFunction {
+        String name;
+        List<String> parameters;
+        String expression;
+    }
+
+    private static class CodeLine {
+        int lineNumber = 0;
+        String label = null;
+        String code = "";
+    }
+}

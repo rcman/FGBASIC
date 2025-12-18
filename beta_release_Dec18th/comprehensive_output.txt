@@ -1,0 +1,128 @@
+═══════════════════════════════════════════════════════
+Running: comprehensive_test.bas
+═══════════════════════════════════════════════════════
+
+Program loaded in 7.895 ms
+
+=========================================
+  FGBASIC 2.0.2 COMPREHENSIVE TEST
+=========================================
+
+=== SECTION 1: Basic Language ===
+
+1.1 Variables
+0.0
+0.0
+0.0
+
+
+=== SECTION 2: Math Operations ===
+
+2.1 Arithmetic
+1.0
+1.0
+1.0
+1.0
+0.0
+1.0
+
+2.2 Math Functions
+1.0
+1.0
+1.0
+1.0
+1.0
+1.0
+1.0
+1.0
+1.0
+1.0
+
+=== SECTION 3: String Functions ===
+
+
+
+
+
+
+
+
+1.0
+
+
+1.0
+
+
+=== SECTION 4: Control Flow ===
+
+4.1 IF-THEN-ELSE
+  10 > 5: TRUE
+  10 < 5: FALSE
+
+4.2 Comparisons
+  5 = 5: TRUE
+  5 < 10: TRUE
+  10 > 5: TRUE
+  5 <= 5: TRUE
+  10 >= 10: TRUE
+  5 <> 10: TRUE
+
+4.3 FOR Loop
+  Count 1 to 5:
+0.0
+0.0
+0.0
+0.0
+0.0
+  Count by 2s:
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+
+4.4 WHILE Loop
+  Count while < 3:
+0.0
+0.0
+0.0
+
+4.5 DO Loop
+  DO WHILE:
+0.0
+0.0
+0.0
+
+4.6 Nested Loops
+  2x2 Grid:
+    (", ROW, ",", COL, ")
+    (", ROW, ",", COL, ")
+    (", ROW, ",", COL, ")
+    (", ROW, ",", COL, ")
+
+=== SECTION 5: Arrays ===
+
+5.1 Array Operations
+1.0
+1.0
+1.0
+
+5.2 Fill Array with Loop
+0.0
+
+=== SECTION 6: DATA/READ/RESTORE ===
+
+0.0
+
+0.0
+
+=== SECTION 7: Subroutines ===
+
+7.1 GOSUB/RETURN
+
+═══════════════════════════════════════════════════════
+✅ Program completed successfully
+Total time: 19.240 ms
+Execution time: 11.345 ms
+═══════════════════════════════════════════════════════

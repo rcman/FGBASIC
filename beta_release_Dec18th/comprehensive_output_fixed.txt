@@ -1,0 +1,128 @@
+═══════════════════════════════════════════════════════
+Running: comprehensive_test.bas
+═══════════════════════════════════════════════════════
+
+Program loaded in 8.759 ms
+
+=========================================
+  FGBASIC 2.0.2 COMPREHENSIVE TEST
+=========================================
+
+=== SECTION 1: Basic Language ===
+
+1.1 Variables
+  Integer:  42.0
+  Float:  3.14159
+  Sum:  45.14159
+  String:  FGBasic   2.0.2
+
+=== SECTION 2: Math Operations ===
+
+2.1 Arithmetic
+  10 + 3 =  13.0
+  10 - 3 =  7.0
+  10 * 3 =  30.0
+  10 / 3 =  3.3333333333333335
+  10 MOD 3 =  1.0
+  2 ^ 8 =  256.0
+
+2.2 Math Functions
+  ABS(-5) =  5.0
+  INT(3.7) =  3.0
+  SQR(16) =  4.0
+  SIN(45) =  0.7071067811865475
+  COS(45) =  0.7071067811865476
+  TAN(45) =  0.9999999999999999
+  ATN(1) =  45.0
+  SGN(-10) =  -1.0
+  RND =  0.6062801777037627
+  RND(100) =  37.39614750179896
+
+=== SECTION 3: String Functions ===
+
+  String:  Hello World
+  LEN =  
+  LEFT(5) =  Hello
+  RIGHT(5) =  World
+  MID(7,5) =  World
+  UPPER =  HELLO WORLD
+  LOWER =  hello world
+  ASC(H) =  72.0
+  CHR(65) =  A
+  STR(42) =  42
+  VAL(123) =  123.0
+  INSTR =  
+
+=== SECTION 4: Control Flow ===
+
+4.1 IF-THEN-ELSE
+  10 > 5: TRUE
+  10 < 5: FALSE
+
+4.2 Comparisons
+  5 = 5: TRUE
+  5 < 10: TRUE
+  10 > 5: TRUE
+  5 <= 5: TRUE
+  10 >= 10: TRUE
+  5 <> 10: TRUE
+
+4.3 FOR Loop
+  Count 1 to 5:
+     1.0
+     2.0
+     3.0
+     4.0
+     5.0
+  Count by 2s:
+     0.0
+     2.0
+     4.0
+     6.0
+     8.0
+     10.0
+
+4.4 WHILE Loop
+  Count while < 3:
+     0.0
+     1.0
+     2.0
+
+4.5 DO Loop
+  DO WHILE:
+     0.0
+     1.0
+     2.0
+
+4.6 Nested Loops
+  2x2 Grid:
+    ( 1.0 , 1.0 )
+    ( 1.0 , 2.0 )
+    ( 2.0 , 1.0 )
+    ( 2.0 , 2.0 )
+
+=== SECTION 5: Arrays ===
+
+5.1 Array Operations
+  NUMS(0) =  10.0
+  NUMS(2) =  30.0
+  NUMS(4) =  50.0
+
+5.2 Fill Array with Loop
+  Squares:  0.0 1.0 4.0 9.0 16.0 25.0
+
+=== SECTION 6: DATA/READ/RESTORE ===
+
+  Numbers:  100.0 200.0 300.0
+  Fruits:  Apple   Banana   Cherry
+  After RESTORE:  100.0
+
+=== SECTION 7: Subroutines ===
+
+7.1 GOSUB/RETURN
+
+═══════════════════════════════════════════════════════
+✅ Program completed successfully
+Total time: 22.340 ms
+Execution time: 13.581 ms
+═══════════════════════════════════════════════════════
